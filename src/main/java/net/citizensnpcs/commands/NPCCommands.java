@@ -30,7 +30,6 @@ import net.citizensnpcs.api.util.DataKey;
 import net.citizensnpcs.api.util.MemoryDataKey;
 import net.citizensnpcs.api.util.Messaging;
 import net.citizensnpcs.npc.CitizensNPC;
-import net.citizensnpcs.npc.EntityControllers;
 import net.citizensnpcs.npc.NPCSelector;
 import net.citizensnpcs.npc.Template;
 import net.citizensnpcs.trait.Age;
@@ -229,7 +228,7 @@ public class NPCCommands {
             min = 1,
             max = 1,
             permission = "citizens.npc.copy")
-    public void copy(CommandContext args, CommandSender sender, NPC npc) {
+    public void copy(CommandContext args, CommandSender sender, NPC npc) throws CommandException {
         EntityType type = npc.getTrait(MobType.class).getType();
         String name = args.getFlag("name", npc.getFullName());
         CitizensNPC copy = (CitizensNPC) npcRegistry.createNPC(type, name);
@@ -248,6 +247,18 @@ public class NPCCommands {
 
         for (Trait trait : copy.getTraits())
             trait.onCopy();
+
+        CommandSenderCreateNPCEvent event = sender instanceof Player ? new PlayerCreateNPCEvent((Player) sender, copy)
+                : new CommandSenderCreateNPCEvent(sender, copy);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            event.getNPC().destroy();
+            String reason = "Couldn't create NPC.";
+            if (!event.getCancelReason().isEmpty())
+                reason += " Reason: " + event.getCancelReason();
+            throw new CommandException(reason);
+        }
+
         Messaging.sendTr(sender, Messages.NPC_COPIED, npc.getName());
         selector.select(sender, copy);
     }
@@ -282,7 +293,7 @@ public class NPCCommands {
                 type = EntityType.PLAYER;
             }
         }
-        if (!sender.hasPermission("citizens.npc.create.*")
+        if (!sender.hasPermission("citizens.npc.create.*") && !sender.hasPermission("citizens.npc.createall")
                 && !sender.hasPermission("citizens.npc.create." + type.name().toLowerCase().replace("_", "")))
             throw new NoPermissionsException();
 
@@ -299,8 +310,6 @@ public class NPCCommands {
                 msg += " as a baby";
             }
         }
-
-        msg += ".";
 
         // Initialize necessary traits
         if (!Setting.SERVER_OWNS_NPCS.asBoolean())
@@ -325,37 +334,7 @@ public class NPCCommands {
         }
 
         if (args.hasValueFlag("at")) {
-            String[] parts = Iterables.toArray(Splitter.on(':').split(args.getFlag("at")), String.class);
-            if (parts.length > 0) {
-                String worldName = args.getSenderLocation() != null ? args.getSenderLocation().getWorld().getName()
-                        : "";
-                int x = 0, y = 0, z = 0;
-                float yaw = 0F, pitch = 0F;
-                switch (parts.length) {
-                    case 6:
-                        pitch = Float.parseFloat(parts[5]);
-                    case 5:
-                        yaw = Float.parseFloat(parts[4]);
-                    case 4:
-                        worldName = parts[3];
-                    case 3:
-                        x = Integer.parseInt(parts[0]);
-                        y = Integer.parseInt(parts[1]);
-                        z = Integer.parseInt(parts[2]);
-                        break;
-                    default:
-                        throw new CommandException(Messages.INVALID_SPAWN_LOCATION);
-                }
-                World world = Bukkit.getWorld(worldName);
-                if (world == null)
-                    throw new CommandException(Messages.INVALID_SPAWN_LOCATION);
-                spawnLoc = new Location(world, x, y, z, yaw, pitch);
-            } else {
-                Player search = Bukkit.getPlayerExact(args.getFlag("at"));
-                if (search == null)
-                    throw new CommandException(Messages.PLAYER_NOT_FOUND_FOR_SPAWN);
-                spawnLoc = search.getLocation();
-            }
+            spawnLoc = Util.parseLocation(args.getSenderLocation(), args.getFlag("at"));
         }
         if (spawnLoc == null) {
             npc.destroy();
@@ -400,7 +379,7 @@ public class NPCCommands {
         if (npc.getBukkitEntity() instanceof Ageable)
             npc.getTrait(Age.class).setAge(age);
         selector.select(sender, npc);
-        Messaging.send(sender, msg);
+        Messaging.send(sender, msg + '.');
     }
 
     @Command(
@@ -430,7 +409,7 @@ public class NPCCommands {
             aliases = { "npc" },
             usage = "gamemode [gamemode]",
             desc = "Changes the gamemode",
-            modifiers = { "gravity" },
+            modifiers = { "gamemode" },
             min = 1,
             max = 2,
             permission = "citizens.npc.gravity")
@@ -696,7 +675,7 @@ public class NPCCommands {
             max = 1,
             flags = "ar",
             permission = "citizens.npc.playerlist")
-    @Requirements(types = EntityType.PLAYER)
+    @Requirements(selected = true, ownership = true, types = EntityType.PLAYER)
     public void playerlist(CommandContext args, CommandSender sender, NPC npc) {
         boolean remove = !npc.data().get("removefromplayerlist", Setting.REMOVE_PLAYERS_FROM_PLAYER_LIST.asBoolean());
         if (args.hasFlag('a'))
@@ -719,7 +698,6 @@ public class NPCCommands {
             min = 1,
             max = 2,
             permission = "citizens.npc.pose")
-    @Requirements(selected = true, ownership = true)
     public void pose(CommandContext args, CommandSender sender, NPC npc) throws CommandException {
         Poses trait = npc.getTrait(Poses.class);
         if (args.hasValueFlag("save")) {
@@ -889,13 +867,22 @@ public class NPCCommands {
             } catch (NumberFormatException ex) {
                 String name = args.getString(1);
                 List<NPC> possible = Lists.newArrayList();
+                double range = -1;
+                if (args.hasValueFlag("r"))
+                    range = Math.abs(args.getFlagDouble("r"));
                 for (NPC test : npcRegistry) {
-                    if (test.getName().equalsIgnoreCase(name))
+                    if (test.getName().equalsIgnoreCase(name)) {
+                        if (range > 0
+                                && test.isSpawned()
+                                && !Util.locationWithinRange(args.getSenderLocation(), test.getBukkitEntity()
+                                        .getLocation(), range))
+                            continue;
                         possible.add(test);
+                    }
                 }
-                if (possible.size() == 1)
+                if (possible.size() == 1) {
                     toSelect = possible.get(0);
-                else if (possible.size() > 1) {
+                } else if (possible.size() > 1) {
                     SelectionPrompt.start(selector, (Player) sender, possible);
                     return;
                 }
@@ -943,15 +930,15 @@ public class NPCCommands {
 
     @Command(
             aliases = { "npc" },
-            usage = "spawn [id]",
+            usage = "spawn (id)",
             desc = "Spawn an existing NPC",
             modifiers = { "spawn" },
-            min = 2,
+            min = 1,
             max = 2,
             permission = "citizens.npc.spawn")
     @Requirements(ownership = true)
     public void spawn(CommandContext args, CommandSender sender, NPC npc) throws CommandException {
-        NPC respawn = npcRegistry.getById(args.getInteger(1));
+        NPC respawn = args.argsLength() > 1 ? npcRegistry.getById(args.getInteger(1)) : npc;
         if (respawn == null)
             throw new CommandException(Messages.NO_NPC_WITH_ID_FOUND, args.getInteger(1));
         if (respawn.isSpawned())
@@ -1116,7 +1103,7 @@ public class NPCCommands {
         EntityType type = Util.matchEntityType(args.getString(1));
         if (type == null)
             throw new CommandException(Messages.INVALID_ENTITY_TYPE, args.getString(1));
-        ((CitizensNPC) npc).setEntityController(EntityControllers.createForType(type));
+        npc.setBukkitEntityType(type);
         Messaging.sendTr(sender, Messages.ENTITY_TYPE_SET, npc.getName(), args.getString(1));
     }
 
@@ -1142,7 +1129,7 @@ public class NPCCommands {
 
     @Command(
             aliases = { "npc" },
-            usage = "wolf (-s(itting) a(ngry) t(amed)) --collar [rgb color]",
+            usage = "wolf (-s(itting) a(ngry) t(amed)) --collar [hex rgb color|name]",
             desc = "Sets wolf modifiers",
             modifiers = { "wolf" },
             min = 1,
@@ -1159,9 +1146,9 @@ public class NPCCommands {
             String unparsed = args.getFlag("collar");
             DyeColor color = null;
             try {
-                DyeColor.valueOf(unparsed.toUpperCase().replace(' ', '_'));
+                color = DyeColor.valueOf(unparsed.toUpperCase().replace(' ', '_'));
             } catch (IllegalArgumentException e) {
-                int rgb = Integer.parseInt(unparsed.replace("#", ""));
+                int rgb = Integer.parseInt(unparsed.replace("#", ""), 16);
                 color = DyeColor.getByColor(org.bukkit.Color.fromRGB(rgb));
             }
             if (color == null)

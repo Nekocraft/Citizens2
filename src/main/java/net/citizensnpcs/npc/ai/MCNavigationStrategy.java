@@ -4,11 +4,11 @@ import net.citizensnpcs.api.ai.NavigatorParameters;
 import net.citizensnpcs.api.ai.TargetType;
 import net.citizensnpcs.api.ai.event.CancelReason;
 import net.citizensnpcs.api.npc.NPC;
-import net.minecraft.server.v1_5_R2.EntityLiving;
-import net.minecraft.server.v1_5_R2.Navigation;
+import net.minecraft.server.v1_5_R3.EntityLiving;
+import net.minecraft.server.v1_5_R3.Navigation;
 
 import org.bukkit.Location;
-import org.bukkit.craftbukkit.v1_5_R2.entity.CraftLivingEntity;
+import org.bukkit.craftbukkit.v1_5_R3.entity.CraftLivingEntity;
 
 public class MCNavigationStrategy extends AbstractPathStrategy {
     private final Navigation navigation;
@@ -44,6 +44,11 @@ public class MCNavigationStrategy extends AbstractPathStrategy {
     @Override
     public void stop() {
         navigation.g();
+    }
+
+    @Override
+    public String toString() {
+        return "MCNavigationStrategy [target=" + target + "]";
     }
 
     @Override
