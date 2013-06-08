@@ -1,8 +1,8 @@
 package net.citizensnpcs.util;
 
-import java.lang.reflect.Constructor;
 import java.util.Random;
 
+import net.citizensnpcs.api.command.exception.CommandException;
 import net.citizensnpcs.api.event.NPCCollisionEvent;
 import net.citizensnpcs.api.event.NPCPushEvent;
 import net.citizensnpcs.api.npc.NPC;
@@ -10,6 +10,7 @@ import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -17,8 +18,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
 import com.google.common.base.Splitter;
+import com.google.common.collect.Iterables;
 
-@SuppressWarnings("unchecked")
 public class Util {
     // Static class for small (emphasis small) utility methods
     private Util() {
@@ -26,7 +27,6 @@ public class Util {
 
     private static final Location AT_LOCATION = new Location(null, 0, 0, 0);
     private static final Location FROM_LOCATION = new Location(null, 0, 0, 0);
-    private static Constructor<? extends Random> RNG_CONSTRUCTOR = null;
 
     public static void assumePose(LivingEntity entity, float yaw, float pitch) {
         NMS.look(entity, yaw, pitch);
@@ -66,13 +66,7 @@ public class Util {
     }
 
     public static Random getFastRandom() {
-        try {
-            byte[] seed = new byte[20];
-            new Random().nextBytes(seed);
-            return RNG_CONSTRUCTOR.newInstance(seed);
-        } catch (Exception e) {
-            return new Random();
-        }
+        return new XORShiftRNG();
     }
 
     public static String getMinecraftVersion() {
@@ -91,6 +85,14 @@ public class Util {
         int chunkX = location.getBlockX() >> 4;
         int chunkZ = location.getBlockZ() >> 4;
         return location.getWorld().isChunkLoaded(chunkX, chunkZ);
+    }
+
+    public static boolean locationWithinRange(Location current, Location target, double range) {
+        if (current == null || target == null)
+            return false;
+        if (current.getWorld() != target.getWorld())
+            return false;
+        return current.distanceSquared(target) < Math.pow(range, 2);
     }
 
     public static EntityType matchEntityType(String toMatch) {
@@ -127,14 +129,36 @@ public class Util {
         return false;
     }
 
-    static {
-        try {
-            RNG_CONSTRUCTOR = (Constructor<? extends Random>) Class.forName("org.uncommons.maths.random.XORShiftRNG")
-                    .getConstructor(byte[].class);
-        } catch (ClassNotFoundException e) {
-        } catch (SecurityException e) {
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
+    public static Location parseLocation(Location currentLocation, String flag) throws CommandException {
+        String[] parts = Iterables.toArray(Splitter.on(':').split(flag), String.class);
+        if (parts.length > 0) {
+            String worldName = currentLocation != null ? currentLocation.getWorld().getName() : "";
+            int x = 0, y = 0, z = 0;
+            float yaw = 0F, pitch = 0F;
+            switch (parts.length) {
+                case 6:
+                    pitch = Float.parseFloat(parts[5]);
+                case 5:
+                    yaw = Float.parseFloat(parts[4]);
+                case 4:
+                    worldName = parts[3];
+                case 3:
+                    x = Integer.parseInt(parts[0]);
+                    y = Integer.parseInt(parts[1]);
+                    z = Integer.parseInt(parts[2]);
+                    break;
+                default:
+                    throw new CommandException(Messages.INVALID_SPAWN_LOCATION);
+            }
+            World world = Bukkit.getWorld(worldName);
+            if (world == null)
+                throw new CommandException(Messages.INVALID_SPAWN_LOCATION);
+            return new Location(world, x, y, z, yaw, pitch);
+        } else {
+            Player search = Bukkit.getPlayerExact(flag);
+            if (search == null)
+                throw new CommandException(Messages.PLAYER_NOT_FOUND_FOR_SPAWN);
+            return search.getLocation();
         }
     }
 }

@@ -12,6 +12,8 @@ import net.citizensnpcs.api.ai.GoalSelector;
 import net.citizensnpcs.api.ai.Navigator;
 import net.citizensnpcs.api.ai.event.CancelReason;
 import net.citizensnpcs.api.ai.event.NavigatorCallback;
+import net.citizensnpcs.api.command.CommandContext;
+import net.citizensnpcs.api.command.exception.CommandException;
 import net.citizensnpcs.api.event.NPCDespawnEvent;
 import net.citizensnpcs.api.event.NPCRemoveEvent;
 import net.citizensnpcs.api.npc.NPC;
@@ -22,6 +24,7 @@ import net.citizensnpcs.editor.Editor;
 import net.citizensnpcs.trait.waypoint.triggers.TriggerEditPrompt;
 import net.citizensnpcs.util.Messages;
 import net.citizensnpcs.util.NMS;
+import net.citizensnpcs.util.Util;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -48,7 +51,30 @@ public class LinearWaypointProvider implements WaypointProvider {
     private final List<Waypoint> waypoints = Lists.newArrayList();
 
     @Override
-    public WaypointEditor createEditor(Player player) {
+    public WaypointEditor createEditor(Player player, CommandContext args) {
+        if (args.hasFlag('h')) {
+            waypoints.add(new Waypoint(player.getLocation()));
+            return null;
+        } else if (args.hasValueFlag("at")) {
+            try {
+                Location location = Util.parseLocation(player.getLocation(), args.getFlag("at"));
+                waypoints.add(new Waypoint(location));
+            } catch (CommandException e) {
+                Messaging.sendError(player, e.getMessage());
+            }
+            return null;
+        } else if (args.hasFlag('c')) {
+            waypoints.clear();
+            return null;
+        } else if (args.hasFlag('l')) {
+            if (waypoints.size() > 0) {
+                waypoints.remove(waypoints.size() - 1);
+            }
+            return null;
+        } else if (args.hasFlag('p')) {
+            setPaused(!isPaused());
+            return null;
+        }
         return new LinearWaypointEditor(player);
     }
 
@@ -399,9 +425,13 @@ public class LinearWaypointProvider implements WaypointProvider {
             getNavigator().getLocalParameters().addSingleUseCallback(new NavigatorCallback() {
                 @Override
                 public void onCompletion(@Nullable CancelReason cancelReason) {
-                    selector.finish();
-                    if (currentDestination != null)
+                    if (npc.isSpawned()
+                            && currentDestination != null
+                            && Util.locationWithinRange(npc.getBukkitEntity().getLocation(),
+                                    currentDestination.getLocation(), 4)) {
                         currentDestination.onReach(npc);
+                    }
+                    selector.finish();
                 }
             });
             return true;

@@ -22,11 +22,12 @@ import net.citizensnpcs.trait.CurrentLocation;
 import net.citizensnpcs.util.Messages;
 import net.citizensnpcs.util.NMS;
 import net.citizensnpcs.util.Util;
-import net.minecraft.server.v1_5_R2.EntityLiving;
+import net.minecraft.server.v1_5_R3.EntityLiving;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.craftbukkit.v1_5_R2.entity.CraftLivingEntity;
+import org.bukkit.craftbukkit.v1_5_R3.entity.CraftLivingEntity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason;
 import org.bukkit.metadata.FixedMetadataValue;
@@ -68,8 +69,8 @@ public class CitizensNPC extends AbstractNPC {
             data().remove("selectors");
         for (Trait trait : traits.values())
             trait.onDespawn();
-        entityController.remove();
         navigator.onDespawn();
+        entityController.remove();
         return true;
     }
 
@@ -81,6 +82,11 @@ public class CitizensNPC extends AbstractNPC {
     @Override
     public Navigator getNavigator() {
         return navigator;
+    }
+
+    @Override
+    public Location getStoredLocation() {
+        return isSpawned() ? getBukkitEntity().getLocation() : getTrait(CurrentLocation.class).getLocation();
     }
 
     @Override
@@ -144,6 +150,14 @@ public class CitizensNPC extends AbstractNPC {
     public void save(DataKey root) {
         super.save(root);
         navigator.save(root.getRelative("navigator"));
+    }
+
+    @Override
+    public void setBukkitEntityType(EntityType type) {
+        EntityController controller = EntityControllers.createForType(type);
+        if (controller == null)
+            throw new IllegalArgumentException("Unsupported entity type " + type);
+        setEntityController(controller);
     }
 
     public void setEntityController(EntityController newController) {
